@@ -11,3 +11,4 @@ Log into the image and enable networking automatically when it starts up (go to 
 
 Put VM ID into the templateid variable in the inventory file (VBoxManage list vms)
 Put the prefix of whatever IPs the virtual images will pull into the localnetprefix variable 
+Put the path to where the repo is stored in filepath

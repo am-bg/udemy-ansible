@@ -14,7 +14,7 @@
     - name: Start web VM
       command: VBoxManage startvm web --type headless
     - name: See if the hosts are up yet
-      ansible.builtin.shell: "/Users/aaron/Ansible/mactoip.sh web"
+      ansible.builtin.shell: "{{ filepath }}/mactoip.sh web"
       register: result
       until: result.stdout.find("{{ localnetprefix }}") != -1
       retries: 6
@@ -22,7 +22,7 @@
     #- pause:
         #minutes: 1
     - name: Get IPs, put them in the inventory file
-      command: /Users/aaron/Ansible/updateinventory.sh
+      command: {{ filepath }}/updateinventory.sh
     - meta: refresh_inventory
 
 -
@@ -134,7 +134,7 @@
         state=started
     
 #- 
-#  name: Download code 
+#  name: Download code from the local controller to remote host
 #  hosts: web
 #  become: yes
 #  tasks:
@@ -145,7 +145,7 @@
 #    - name: copying file with playbook
 #      become: true 
 #      copy:
-#        src: ~/Ansible/learning-app-ecommerce/
+#        src: {{ filepath }}/learning-app-ecommerce/
 #        dest: /var/www/html/
 #        owner: apache
 #        group: apache
