@@ -1,0 +1,16 @@
+-
+  name: Teardown VirtualBox environment
+  hosts: localhost
+  tasks:
+    - name: Stop DB VM
+      command: VBoxManage controlvm db poweroff
+      ignore_errors: yes
+    - name: Stop web VM
+      command: VBoxManage controlvm web poweroff
+      ignore_errors: yes
+    - name: Destroy web VM image
+      command: VBoxManage unregistervm web --delete
+      ignore_errors: yes
+    - name: Destroy db VM image
+      command: VBoxManage unregistervm db --delete
+      ignore_errors: yes

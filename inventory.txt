@@ -1,0 +1,10 @@
+db ansible_host=192.168.10.191 ansible_connection=ssh ansible_user=osboxes ansible_ssh_pass=osboxes.org ansible_ssh_extra_args='-o StrictHostKeyChecking=no' ansible_become_pass=osboxes.org
+web ansible_host=192.168.10.192 ansible_connection=ssh ansible_user=osboxes ansible_ssh_pass=osboxes.org ansible_ssh_extra_args='-o StrictHostKeyChecking=no' ansible_become_pass=osboxes.org
+
+[all]
+web
+db
+
+[all:vars]
+templateid=cd0bb950-594d-46e3-8bac-6c6db1ef9111
+localnetprefix=192

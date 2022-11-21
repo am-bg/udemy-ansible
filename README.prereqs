@@ -1,0 +1,13 @@
+Have Oracle VirtualBox installed and working on your mac
+Might have to install this version of sshpass: 
+  brew install esolitos/ipa/sshpass
+
+{ probably can do this in vagrant, haven't played with that yet..
+download the centos Virtualbox iso https://sourceforge.net/projects/osboxes/files/v/vb/10-C-nt/9/Workstation/64bit.7z/download
+Load the image in VirtualBox
+Configure the image w/ adapter type "Paravirtualized Network" and "promiscuous: allow all" and "cable connected"
+Log into the image and enable networking automatically when it starts up (go to system settings, networking, start LAN automatically) (un: osboxes pw: osboxes.org)
+}
+
+Put VM ID into the templateid variable in the inventory file (VBoxManage list vms)
+Put the prefix of whatever IPs the virtual images will pull into the localnetprefix variable 

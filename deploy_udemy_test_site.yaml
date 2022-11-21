@@ -1,0 +1,174 @@
+-
+  name: Setup VirtualBox environment
+  hosts: localhost
+  tasks:
+    # grab centos image
+    # setup config items on virtualbox
+    # can I fix the 'network not on' issue?
+    - name: Clone template into DB host
+      command: VBoxManage clonevm {{ templateid }} --name=db --register
+    - name: Clone template into web host
+      command: VBoxManage clonevm {{ templateid }} --name=web --register
+    - name: Start DB VM
+      command: VBoxManage startvm db --type headless
+    - name: Start web VM
+      command: VBoxManage startvm web --type headless
+    - name: See if the hosts are up yet
+      ansible.builtin.shell: "/Users/aaron/Ansible/mactoip.sh web"
+      register: result
+      until: result.stdout.find("{{ localnetprefix }}") != -1
+      retries: 6
+      delay: 10
+    #- pause:
+        #minutes: 1
+    - name: Get IPs, put them in the inventory file
+      command: /Users/aaron/Ansible/updateinventory.sh
+    - meta: refresh_inventory
+
+-
+  name: Start firewalling on all hosts
+  hosts: all
+  become: yes
+  tasks:
+    #- name: Install firewalld on "{{ inventory_hostname }}"
+    - name: Install firewalld
+      yum: 
+        name: firewalld
+        state: present
+    - name: Make sure firewalld is started
+      service: 
+        name=firewalld 
+        state=started
+
+# Deploy and Configure Database
+-
+  name: Install and Configure MariaDB
+  hosts: db
+  become: yes
+  tasks:
+    - name: Install needed mariadb packages
+      yum: 
+        name: 
+          - mariadb-server
+          - python3-pip
+          - python3-PyMySQL
+        state: present
+
+    - name: Make sure mariadb-server is started
+      service: 
+        name=mariadb
+        state=started
+
+    - name: Configure firewall to allow database traffic
+      command: "firewall-cmd --permanent --zone=public --add-port=3306/tcp"
+
+    - name: Reload firewall config
+      command: "firewall-cmd --reload"
+
+    - name: Initialize db
+      community.mysql.mysql_db:
+         name: ecomdb
+         state: present
+         login_unix_socket: /var/lib/mysql/mysql.sock
+      register: database_exists
+
+    - name: Create database user with all database privileges
+      community.mysql.mysql_user:
+        name: ecomuser
+        password: ecompassword
+        priv: '*.*:ALL'
+        state: present
+        login_unix_socket: /var/lib/mysql/mysql.sock
+
+    - name: Make sure we can connect
+      community.mysql.mysql_query:
+        login_db: ecomdb
+        query:
+        - GRANT ALL ON ecomdb.* to 'ecomuser'@'%' IDENTIFIED BY 'ecompassword';
+        - FLUSH PRIVILEGES;
+        single_transaction: yes
+        login_unix_socket: /var/lib/mysql/mysql.sock
+      tags: test
+
+    - name: Load database data
+      community.mysql.mysql_query:
+        login_db: ecomdb
+        query:
+        - CREATE TABLE products (id mediumint(8) unsigned NOT NULL auto_increment,Name varchar(255) default NULL,Price varchar(255) default NULL, ImageUrl varchar(255) default NULL,PRIMARY KEY (id)) AUTO_INCREMENT=1
+        - INSERT INTO products (Name,Price,ImageUrl) VALUES ("Laptop","100","c-1.png"),("Drone","200","c-2.png"),("VR","300","c-3.png"),("Tablet","50","c-5.png"),("Watch","90","c-6.png"),("Phone Covers","20","c-7.png"),("Phone","80","c-8.png"),("Laptop","150","c-4.png")
+        single_transaction: yes
+        login_unix_socket: /var/lib/mysql/mysql.sock
+      when: database_exists.changed
+
+
+## Deploy and Configure Web
+
+-
+  name: Deploy and configure web hosts
+  hosts: web
+  become: yes
+  tasks:
+    - name: Install required packages
+      yum: 
+        name: 
+          - httpd
+          - php
+          - php-mysqlnd
+        state: present
+
+    - name: Configure firewall for web traffic
+      command: "firewall-cmd --permanent --zone=public --add-port=80/tcp"
+
+    - name: Reload firewall config
+      command: "firewall-cmd --reload"
+
+    - name: Change `DirectoryIndex index.html` to `DirectoryIndex index.php` to make the php page the default page
+      lineinfile:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: '^DirectoryIndex'
+        line: DirectoryIndex index.php 
+
+    - name: Make sure httpd is started
+      service: 
+        name=httpd
+        state=started
+    
+#- 
+#  name: Download code 
+#  hosts: web
+#  become: yes
+#  tasks:
+#    - name: check if directory already exists
+#      stat:
+#        path: /var/www/html/index.php
+#      register: file_exists
+#    - name: copying file with playbook
+#      become: true 
+#      copy:
+#        src: ~/Ansible/learning-app-ecommerce/
+#        dest: /var/www/html/
+#        owner: apache
+#        group: apache
+#        mode: 0644
+#      when: file_exists.stat.exists == False
+    - name: Clone web content repo
+      git:
+        repo: http://github.com/kodekloudhub/learning-app-ecommerce
+        dest: /var/www/html
+        force: yes
+
+    - name: Update index.php with database host IP
+      lineinfile:
+        path: /var/www/html/index.php
+        regexp: "link = mysqli_connect"
+        line: "$link = mysqli_connect('{{ hostvars[\"db\"].ansible_host }}', 'ecomuser', 'ecompassword', 'ecomdb');"
+
+    - name: Tell centos it is allowed to talk to the db
+      command: "setsebool -P httpd_can_network_connect_db 1"
+
+-
+  name: Finish
+  hosts: web
+  tasks:
+    - name: Successful deployment. Access the site through this URL http://{{ ansible_host }} 
+      command: echo
