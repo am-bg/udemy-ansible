@@ -1,11 +1,36 @@
-db ansible_host=192.168.10.194 ansible_connection=ssh ansible_user=osboxes ansible_ssh_pass=osboxes.org ansible_ssh_extra_args='-o StrictHostKeyChecking=no' ansible_become_pass=osboxes.org
-web ansible_host=192.168.10.193 ansible_connection=ssh ansible_user=osboxes ansible_ssh_pass=osboxes.org ansible_ssh_extra_args='-o StrictHostKeyChecking=no' ansible_become_pass=osboxes.org
+db ansible_host=192.168.10.208 ansible_connection=ssh ansible_user=osboxes ansible_ssh_pass=osboxes.org ansible_ssh_extra_args='-o StrictHostKeyChecking=no' ansible_become_pass=osboxes.org
+web ansible_host=192.168.10.252 ansible_connection=ssh ansible_user=osboxes ansible_ssh_pass=osboxes.org ansible_ssh_extra_args='-o StrictHostKeyChecking=no' ansible_become_pass=osboxes.org
 
 [all]
 web
 db
 
 [all:vars]
-templateid=cd0bb950-594d-46e3-8bac-6c6db1ef9111
 localnetprefix=192
 filepath=/Users/aaron/Ansible
+distro=CentOS
+templateid=cd0bb950-594d-46e3-8bac-6c6db1ef9111
+snapshotid=d27fe3ef-7dad-4ab3-a1f8-26837687b7d8
+# distro=Ubuntu
+# ubuntu templateid=a3f91554-1a2b-4ff4-86f5-e159b29035ac
+# ubuntu snapshotid=9f158181-4818-4ac1-b24a-7dbb51403fad
+
+[centos]
+web
+db
+
+[centos:vars]
+distro=CentOS
+mysqlsock=/var/lib/mysql/mysql.sock
+apachepkgname=httpd
+apacheconf=/etc/httpd/conf/httpd.conf
+firewallpkgname=firewalld
+
+[ubuntu]
+
+[ubuntu:vars]
+distro=Ubuntu
+mysqlsock=/var/run/mysqld/mysqld.sock
+apachepkgname=apache2
+apacheconf=/etc/apache2/apache2.conf
+firewallpkgname=ufw

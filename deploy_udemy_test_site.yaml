@@ -2,27 +2,34 @@
   name: Setup VirtualBox environment
   hosts: localhost
   tasks:
+    # to fully automate - will need to:
     # grab centos image
     # setup config items on virtualbox
     # can I fix the 'network not on' issue?
     - name: Clone template into DB host
-      command: VBoxManage clonevm {{ templateid }} --name=db --register
+      command: VBoxManage clonevm "{{ templateid }}" --name=db --register --options=Link --mode=machine --snapshot="{{ snapshotid }}"
     - name: Clone template into web host
-      command: VBoxManage clonevm {{ templateid }} --name=web --register
+      command: VBoxManage clonevm "{{ templateid }}" --name=web --register --options=Link --mode=machine --snapshot="{{ snapshotid }}"
     - name: Start DB VM
       command: VBoxManage startvm db --type headless
     - name: Start web VM
       command: VBoxManage startvm web --type headless
-    - name: See if the hosts are up yet
-      ansible.builtin.shell: "{{ filepath }}/mactoip.sh web"
+    - name: See if hosts are up yet
+      command: "{{ filepath }}/mactoip.sh web"
       register: result
       until: result.stdout.find("{{ localnetprefix }}") != -1
       retries: 6
-      delay: 10
-    #- pause:
+      delay: 20
+        #- pause:
         #minutes: 1
+-
+  name: Rebuild inventory
+  hosts: localhost
+  tasks:
     - name: Get IPs, put them in the inventory file
-      command: {{ filepath }}/updateinventory.sh
+      command: "{{ filepath }}/updateinventory.sh {{ distro }}"
+      #when: ansible_distribution == "Ubuntu"
+      #when: ansible_distribution == "CentOS"
     - meta: refresh_inventory
 
 -
@@ -30,15 +37,21 @@
   hosts: all
   become: yes
   tasks:
-    #- name: Install firewalld on "{{ inventory_hostname }}"
-    - name: Install firewalld
-      yum: 
-        name: firewalld
+    - name: Install firewall
+      package: 
+        name: "{{ firewallpkgname }}"
         state: present
     - name: Make sure firewalld is started
       service: 
-        name=firewalld 
+        name="{{ firewallpkgname }}"
         state=started
+    - name: Ubuntu - allow sshd and enable firewall
+      command: "{{ item }}"
+      with_items:
+        - ufw allow 22/tcp
+        - ufw --force enable
+      when: ansible_distribution == "Ubuntu"
+
 
 # Deploy and Configure Database
 -
@@ -46,30 +59,58 @@
   hosts: db
   become: yes
   tasks:
-    - name: Install needed mariadb packages
+    - name: Install needed mariadb packages CentOS
       yum: 
         name: 
           - mariadb-server
           - python3-pip
           - python3-PyMySQL
         state: present
+      when: ansible_distribution == "CentOS"
+    - name: Install needed mariadb packages Ubuntu
+      apt: 
+        name: 
+          - mariadb-server
+          - python3-pip
+          - python3-pymysql
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Ubuntu - Allow Mariadb to listen on 3306
+      lineinfile:
+        path: /etc/mysql/mariadb.cnf
+        regexp: '^# port = 3306'
+        line: "port = 3306"
+      when: ansible_distribution == "Ubuntu"
+
+    - name: Ubuntu - Allow Mariadb to listen on localnet
+      lineinfile:
+        path: /etc/mysql/mariadb.conf.d/50-server.cnf
+        regexp: '^bind-address'
+        line: "bind-address            = {{ ansible_host }}"
+      when: ansible_distribution == "Ubuntu"
+
+    - name: CentOS - Configure firewall to allow database traffic
+      command: "firewall-cmd --permanent --zone=public --add-port=3306/tcp"
+      when: ansible_distribution == "CentOS"
+
+    - name: CentOS - Reload firewall config
+      command: "firewall-cmd --reload"
+      when: ansible_distribution == "CentOS"
+
+    - name: Ubuntu firewall allow mysql
+      command: ufw allow 3306/tcp
+      when: ansible_distribution == "Ubuntu"
 
     - name: Make sure mariadb-server is started
       service: 
         name=mariadb
         state=started
 
-    - name: Configure firewall to allow database traffic
-      command: "firewall-cmd --permanent --zone=public --add-port=3306/tcp"
-
-    - name: Reload firewall config
-      command: "firewall-cmd --reload"
-
     - name: Initialize db
       community.mysql.mysql_db:
-         name: ecomdb
-         state: present
-         login_unix_socket: /var/lib/mysql/mysql.sock
+        name: ecomdb
+        state: present
+        login_unix_socket: "{{ mysqlsock }}"
       register: database_exists
 
     - name: Create database user with all database privileges
@@ -78,7 +119,7 @@
         password: ecompassword
         priv: '*.*:ALL'
         state: present
-        login_unix_socket: /var/lib/mysql/mysql.sock
+        login_unix_socket: "{{ mysqlsock }}"
 
     - name: Make sure we can connect
       community.mysql.mysql_query:
@@ -87,7 +128,7 @@
         - GRANT ALL ON ecomdb.* to 'ecomuser'@'%' IDENTIFIED BY 'ecompassword';
         - FLUSH PRIVILEGES;
         single_transaction: yes
-        login_unix_socket: /var/lib/mysql/mysql.sock
+        login_unix_socket: "{{ mysqlsock }}"
       tags: test
 
     - name: Load database data
@@ -97,8 +138,13 @@
         - CREATE TABLE products (id mediumint(8) unsigned NOT NULL auto_increment,Name varchar(255) default NULL,Price varchar(255) default NULL, ImageUrl varchar(255) default NULL,PRIMARY KEY (id)) AUTO_INCREMENT=1
         - INSERT INTO products (Name,Price,ImageUrl) VALUES ("Laptop","100","c-1.png"),("Drone","200","c-2.png"),("VR","300","c-3.png"),("Tablet","50","c-5.png"),("Watch","90","c-6.png"),("Phone Covers","20","c-7.png"),("Phone","80","c-8.png"),("Laptop","150","c-4.png")
         single_transaction: yes
-        login_unix_socket: /var/lib/mysql/mysql.sock
+        login_unix_socket: "{{ mysqlsock }}"
       when: database_exists.changed
+
+    - name: Make sure mariadb-server is restarted
+      service: 
+        name=mariadb
+        state=restarted
 
 
 ## Deploy and Configure Web
@@ -109,28 +155,35 @@
   become: yes
   tasks:
     - name: Install required packages
-      yum: 
+      package: 
         name: 
-          - httpd
+          - "{{ apachepkgname }}"
           - php
           - php-mysqlnd
+          - git
         state: present
 
-    - name: Configure firewall for web traffic
+    - name: CentOS - Configure firewall for web traffic
       command: "firewall-cmd --permanent --zone=public --add-port=80/tcp"
+      when: ansible_distribution == "CentOS"
 
-    - name: Reload firewall config
+    - name: CentOS - Reload firewall config
       command: "firewall-cmd --reload"
+      when: ansible_distribution == "CentOS"
+
+    - name: Ubuntu firewall allow mysql
+      command: ufw allow 80/tcp
+      when: ansible_distribution == "Ubuntu"
 
     - name: Change `DirectoryIndex index.html` to `DirectoryIndex index.php` to make the php page the default page
       lineinfile:
-        path: /etc/httpd/conf/httpd.conf
+        path: "{{ apacheconf }}"
         regexp: '^DirectoryIndex'
         line: DirectoryIndex index.php 
 
     - name: Make sure httpd is started
       service: 
-        name=httpd
+        name="{{ apachepkgname }}"
         state=started
     
 #- 
@@ -150,11 +203,17 @@
 #        owner: apache
 #        group: apache
 #        mode: 0644
-#      when: file_exists.stat.exists == False
+#      when: file_exists.stat.exists == False #"
+
+    - name: Remove file (delete file)
+      file:
+        path: /var/www/html/index.html
+        state: absent
+
     - name: Clone web content repo
       git:
         repo: http://github.com/kodekloudhub/learning-app-ecommerce
-        dest: /var/www/html
+        dest: /var/www/html/
         force: yes
 
     - name: Update index.php with database host IP
@@ -165,6 +224,7 @@
 
     - name: Tell centos it is allowed to talk to the db
       command: "setsebool -P httpd_can_network_connect_db 1"
+      when: ansible_distribution == "CentOS"
 
 -
   name: Finish
