@@ -1,6 +1,7 @@
 -
   name: Teardown VirtualBox environment
   hosts: localhost
+  gather_facts: true
   tasks:
     - name: Stop DB VM
       command: VBoxManage controlvm db poweroff
